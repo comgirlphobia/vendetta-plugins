@@ -87,19 +87,60 @@ function LastMessageTime({ id }) {
     );
 }
 
+
 const patch = () => {
+    // Updated finder for newer Discord versions (263+)
+    const UserProfileSection = find((m) => 
+        m?.default?.displayName?.includes?.("UserProfile") || 
+        m?.default?.name?.includes?.("UserProfile") ||
+        (m?.type?.displayName?.includes?.("Profile") && m?.type?.toString?.().includes("user"))
+    );
+
+    if (!UserProfileSection) {
+        console.error("[LastMessage] Could not find UserProfile component");
+        return () => {};
+    }
+
     return after(
-        "default",
-        find((x) => x?.default?.name === "UserProfileName"),
+        "default", 
+        UserProfileSection, 
         ([props], res) => {
-            let container = res?.props?.children?.props?.children;
-            if (!container) return;
-            container.push(<LastMessageTime id={props.user.id} />);
-        },
+            if (!res?.props?.children) return;
+
+            // More robust injection - look for children array or common profile wrapper
+            let children = res.props.children;
+            if (typeof children === "function") children = children(props); // handle possible render prop
+
+            if (Array.isArray(children)) {
+                // Try to inject near the name / header area
+                const nameIndex = children.findIndex(c => 
+                    c?.props?.user || 
+                    c?.type?.displayName?.includes?.("Name") ||
+                    c?.props?.children?.[0]?.props?.user
+                );
+                
+                if (nameIndex !== -1) {
+                    children.splice(nameIndex + 1, 0, <LastMessageTime id={props.user?.id || props.userId} />);
+                } else {
+                    // Fallback: push to end of main container
+                    if (Array.isArray(children[0]?.props?.children)) {
+                        children[0].props.children.push(<LastMessageTime id={props.user?.id || props.userId} />);
+                    } else {
+                        children.push(<LastMessageTime id={props.user?.id || props.userId} />);
+                    }
+                }
+            } else if (children?.props?.children) {
+                // Nested children case
+                const container = children.props.children;
+                if (Array.isArray(container)) {
+                    container.push(<LastMessageTime id={props.user?.id || props.userId} />);
+                }
+            }
+        }
     );
 };
 
 export default function () {
     let patches = [listen(), patch()];
-    return () => patches.forEach((unpatch) => unpatch());
+    return () => patches.forEach((unpatch) => unpatch?.());
 }
